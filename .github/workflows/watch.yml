@@ -1,0 +1,39 @@
+# COEUS-down alarm (Sean, 2026-10-03). COEUS's conveyor runner sets the repo variable HEARTBEAT (UTC ISO time)
+# about every 15 minutes. This job runs on GitHub's computers, so it still works when COEUS is off or offline.
+# Silent for more than 45 minutes: open one issue assigned to shamp-cpu (the GitHub app notifies his phone).
+# Back again: comment and close it. Nothing here can reach or change COEUS.
+name: coeus-watch
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+permissions:
+  issues: write
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check COEUS heartbeat
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEARTBEAT: ${{ vars.HEARTBEAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          now=$(date -u +%s)
+          last=$(date -u -d "${HEARTBEAT:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || echo 0)
+          age=$(( (now - last) / 60 ))
+          echo "Last heartbeat: ${HEARTBEAT:-none} (${age} min ago)"
+          open=$(gh issue list -R "$REPO" --label coeus-down --state open --json number -q '.[0].number')
+          if [ "$age" -gt 45 ]; then
+            if [ -z "$open" ]; then
+              gh label create coeus-down -R "$REPO" --color B60205 --force >/dev/null
+              gh issue create -R "$REPO" --label coeus-down --assignee shamp-cpu \
+                --title "COEUS has been silent for ${age} minutes" \
+                --body "No heartbeat from COEUS since ${HEARTBEAT:-never} (UTC). Possible causes: power or internet outage at home, Windows restart stuck, or the conveyor runner stopped. RepTools, email automation and alerts on COEUS may be down. This issue closes itself when COEUS checks in again."
+            else
+              echo "Already reported in issue #$open"
+            fi
+          elif [ -n "$open" ]; then
+            gh issue comment "$open" -R "$REPO" --body "COEUS is back: heartbeat ${HEARTBEAT} (UTC), ${age} min ago."
+            gh issue close "$open" -R "$REPO"
+          fi
